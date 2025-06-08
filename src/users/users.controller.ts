@@ -63,6 +63,46 @@ export class UsersController {
     }
   }
 
+  @HttpCode(HttpStatus.OK)
+  @Post('signout')
+  async signout(@Req() req: any) {
+    try {
+      const res = await this.usersService.signout(req.body.refresh_token);
+      return res;
+    } catch (error) {
+      throw new HttpException(
+        {
+          status: error.status,
+          error: error.message,
+        },
+        error.status,
+        {
+          cause: error,
+        },
+      );
+    }
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('refresh')
+  async refresh(@Req() req: any) {
+    try {
+      const res = await this.usersService.refresh(req.body.refresh_token);
+      return res;
+    } catch (error) {
+      throw new HttpException(
+        {
+          status: error.status,
+          error: error.message,
+        },
+        error.status,
+        {
+          cause: error,
+        },
+      );
+    }
+  }
+
   @UseGuards(AuthGuard)
   @HttpCode(HttpStatus.OK)
   @Get('vouchers')

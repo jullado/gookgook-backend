@@ -15,6 +15,7 @@ import { Deals } from '../deals/schemas/deal.schema';
 import { ReceiveVoucherServiceDto } from './dto/user_voucher.dto';
 import { DealDiscountType, DealType } from 'src/common/enums/deal.enum';
 import { Products } from 'src/products/schemas/product.schema';
+import { Sessions } from './schemas/session.schema';
 
 @Injectable()
 export class UsersService {
@@ -23,11 +24,13 @@ export class UsersService {
   });
 
   constructor(
-    private jwtService: JwtService,
+    private jwtServiceAccess: JwtService,
+    private jwtServiceRefresh: JwtService,
     @InjectModel(Users.name) private userModel: Model<Users>,
     @InjectModel(UserVouchers.name) private voucherModel: Model<UserVouchers>,
     @InjectModel(Deals.name) private dealModel: Model<Deals>,
     @InjectModel(Products.name) private productModel: Model<Products>,
+    @InjectModel(Sessions.name) private sessionModel: Model<Sessions>,
   ) {}
 
   async signin(username: string, password: string) {
@@ -46,10 +49,77 @@ export class UsersService {
     }
 
     // create and return token
-    const payload = { user_id: user.user_id, username: username };
-    const access_token = await this.jwtService.signAsync(payload);
+    const payload = { user_id: user.user_id, username: username || undefined };
+    const access_token = await this.jwtServiceAccess.signAsync(payload);
+    delete payload['username'];
+    const refresh_token = await this.jwtServiceRefresh.signAsync(payload);
+
+    // save refresh token
+    await this.sessionModel
+      .findOneAndUpdate(
+        { user_id: user.user_id },
+        { refresh_token: refresh_token, create_at: Date.now() },
+        { upsert: true },
+      )
+      .exec();
+
     return {
       access_token: access_token,
+      refresh_token: refresh_token,
+    };
+  }
+
+  async signout(refresh_token: string) {
+    this.logger.log(`signout: ${refresh_token}`);
+
+    // delete refresh token
+    await this.sessionModel.deleteOne({ refresh_token: refresh_token }).exec();
+  }
+
+  async refresh(refresh_token: string) {
+    this.logger.log(`refresh: ${refresh_token}`);
+
+    // check refresh token exists
+    const session = await this.sessionModel
+      .findOne({ refresh_token: refresh_token })
+      .exec();
+    if (!session) {
+      throw new UnauthorizedException('Session not found');
+    }
+
+    // get user data
+    const user = await this.userModel
+      .findOne({ user_id: session.user_id })
+      .exec();
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // create new token
+    const payload = {
+      user_id: session.user_id,
+      username: user.username || undefined,
+    };
+    const access_token = await this.jwtServiceAccess.signAsync(payload);
+    delete payload['username'];
+    refresh_token = await this.jwtServiceRefresh.signAsync(payload);
+
+    // save new refresh token
+    const newSession = await this.sessionModel
+      .findOneAndUpdate(
+        { user_id: user.user_id },
+        { refresh_token: refresh_token, create_at: Date.now() },
+        { new: true },
+      )
+      .exec();
+
+    if (!newSession) {
+      throw new UnauthorizedException('Session not found');
+    }
+
+    return {
+      access_token: access_token,
+      refresh_token: refresh_token,
     };
   }
 
